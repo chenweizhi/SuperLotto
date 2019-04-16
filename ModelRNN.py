@@ -39,7 +39,10 @@ class ModelRNN:
         self.with_dependency = False
 
     def prefix_name(self):
-        return "GRU{}_layers{}_seqLen{}_batchSize{}".format(self.lstm_size,self.num_layers,self.seq_lens,self.batch_size)
+        return "layers{}_seqLen{}_batchSize{}".format(self.lstm_size,
+                                                      self.num_layers,
+                                                      self.seq_lens,
+                                                      self.batch_size)
 
     def build_lstm_model_lstm(self, batch_size, seq_lens, feat_len, symbols_length, test_mode: bool = False):
         if test_mode is True:
@@ -119,8 +122,6 @@ class ModelRNN:
         train_op = tf.train.AdamOptimizer(self.learning_rate)
         self.optimizer = train_op.apply_gradients(zip(grads, tvars))
 
-
-
     def train(self, samples_loader: DataLoader = None):
 
         print("trainer")
@@ -147,8 +148,11 @@ class ModelRNN:
 
             writer = tf.summary.FileWriter(train_log_dir, sess.graph)
 
-
             state_in = sess.run(self.state_in)
+
+            local_prediction = tf.argmax(self.prediction, 1)
+
+            sess.graph.finalize()
 
             counter = 0
             for e in range(epochs):
@@ -180,13 +184,38 @@ class ModelRNN:
                             self.optimizer],
                             feed_dict=feed)
                     end = time.time()
-                    # control the print lines
-                    if counter % 1 == 0:
-                        print('轮数: {}/{}... '.format(e + 1, epochs),
-                              '训练步数: {}... '.format(counter),
-                              '训练误差: {:.4f}... '.format(batch_loss),
+
+                    if counter % 100 == 0:
+                        print('epochs: {}/{}... '.format(e + 1, epochs),
+                              'iterations: {}... '.format(counter),
+                              'error: {:.4f}... '.format(batch_loss),
                               '{:.4f} sec/batch'.format((end - start)))
                         writer.add_summary(summary, counter)
+
+                    if counter % 100 == 0:
+                        error_count = 0
+                        loss_count = 0
+                        amount = 0
+                        for _ in range(samples_loader.get_validation_count()//self.batch_size):
+                            x, y = samples_loader.next_batch_validation(self.batch_size)
+                            x = np.reshape(x, x.shape + (1,))
+
+                            feed = {self.inputs: x,
+                                    self.targets: y,
+                                    self.keep_prob: 1.0,
+                                    self.state_in: state_in}
+
+                            preds, loss, state_in = sess.run([local_prediction, self.loss, self.state_out],
+                                                             feed_dict=feed)
+
+                            diff = preds - np.reshape(y,[-1])
+
+                            error_count += np.count_nonzero(diff)
+                            loss_count += loss
+                            amount += diff.size
+
+                        print("validation match: {} % , avg loss {}".format((100 * (amount - error_count)) / amount,
+                                                                        loss_count / n_batchs_in_epoch))
 
                     if (counter % save_every_n) == 0:
                         saver.save(sess, os.path.join(self.model_path,
@@ -208,11 +237,6 @@ class ModelRNN:
         config = tf.ConfigProto()
         config.gpu_options.per_process_gpu_memory_fraction = 0.7
         config.gpu_options.allow_growth = True
-
-        best_rate = 1
-        worse_rate = 0
-        best_file_path = ""
-        worse_file_path = ""
 
         with tf.Session(config=config) as sess:
 
@@ -237,7 +261,7 @@ class ModelRNN:
 
             for i in range(n_batchs_in_epoch):
 
-                x, y = samples_loader.next_batch_test(next_sample_step)
+                x, y = samples_loader.next_batch_test()
                 x = np.reshape(x, x.shape + (1,))
                 seq_len_ = np.array([x.shape[1]])
 
@@ -256,8 +280,8 @@ class ModelRNN:
                 loss_count += loss
 
                 amount += diff.size
-                errorRate = np.count_nonzero(diff) / diff.size
-                print("{} / {} errorRate: {} ; loss {}".format(i, n_batchs_in_epoch, errorRate, loss))
+                error_rate = np.count_nonzero(diff) / diff.size
+                print("{} / {} errorRate: {} ; loss {}".format(i, n_batchs_in_epoch, error_rate, loss))
 
             print("result match: {} % , avg loss {}".format((100*(amount-error_count))/amount,
                                                             loss_count/n_batchs_in_epoch))
@@ -304,11 +328,9 @@ class ModelRNN:
                     x[0] = preds[0]
                     result.append(preds[0])
                 front = list(set(result))
-                back = list(set(loader.statistics()))
+                back = list(set(loader.statistics_back()))
                 if len(front) == 5 and len(back) == 2:
                     print("{}: front {} back {}".format(i, front, back))
-
-
 
 
 def train():
@@ -325,11 +347,7 @@ def train():
 
     loader.load_xls("dlt2.xls")
 
-    rnn = ModelRNN("log",
-                        "model",
-                        lstm_size=128,
-                        num_layers=2,
-                        learning_rate=0.001)
+    rnn = ModelRNN("log", "model", lstm_size=128, num_layers=2, learning_rate=0.001)
 
     rnn.build_lstm_model_lstm(32, loader.get_seq_len(), 1, loader.get_classes_count(), test_mode=False)
 
@@ -348,11 +366,7 @@ def test():
 
     loader_test.load_xls("dlt2.xls")
 
-    rnn = ModelRNN("log",
-                        "model",
-                        lstm_size=128,
-                        num_layers=2,
-                        learning_rate=0.001)
+    rnn = ModelRNN("log", "model", lstm_size=128, num_layers=2, learning_rate=0.001)
 
     rnn.build_lstm_model_lstm(1, loader_test.get_seq_len(), 1, loader_test.get_classes_count(), test_mode=True)
 
@@ -371,11 +385,7 @@ def random():
 
     loader_test.load_xls("dlt2.xls")
 
-    rnn = ModelRNN("log",
-                        "model",
-                        lstm_size=128,
-                        num_layers=2,
-                        learning_rate=0.001)
+    rnn = ModelRNN("log", "model", lstm_size=128, num_layers=2, learning_rate=0.001)
 
     rnn.build_lstm_model_lstm(1, loader_test.get_seq_len(), 1, loader_test.get_classes_count(), test_mode=True)
 
@@ -383,4 +393,4 @@ def random():
 
 
 if __name__ == "__main__":
-    random()
+    test()

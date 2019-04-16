@@ -17,6 +17,7 @@ class DataLoader:
         self.validation_indices= None
         self.test_indices = None
         self.test_index = 0
+        self.validation_index = 0
 
     def get_classes_count(self):
         return list(self.class_front)[-1] + 1
@@ -29,6 +30,9 @@ class DataLoader:
 
     def get_test_count(self):
         return len(self.test_indices)
+
+    def get_validation_count(self):
+        return len(self.validation_indices)
 
     def load_xls(self, file_path):
         workbook = xlrd.open_workbook(file_path)
@@ -89,21 +93,23 @@ class DataLoader:
         return self.get_batch(sample_index)
 
     def next_batch_validation(self, sample_count):
-        sample_index = np.random.choice(self.validation_indices, sample_count)
+        sample_index = list(range(self.validation_index, self.validation_index+sample_count))
+        self.validation_index += sample_count
+        self.validation_index = self.validation_index % len(self.validation_indices)
+        sample_index = [ i % len(self.validation_indices) for i in sample_index]
         return self.get_batch(sample_index)
 
-    def next_batch_test(self, sample_count):
+    def next_batch_test(self):
         sample_index = [self.test_index]
         self.test_index += 1
         self.test_index = self.test_index % len(self.test_indices)
         return self.get_batch(sample_index)
 
-    def statistics(self):
+    def statistics_back(self):
         counter = [0] * (len(self.class_back)+1)
         for i in self.back:
             counter[i[0]] += 1
             counter[i[1]] += 1
-
         total = 0.0
         for i in counter:
             total += i
@@ -119,4 +125,4 @@ if __name__ == "__main__":
     loader.load_xls('dlt2.xls')
     loader.next_batch_train(32)
     print(loader.get_classes_count())
-    loader.statistics()
+    loader.statistics_back()
